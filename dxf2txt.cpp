@@ -23,6 +23,8 @@ struct Point
 struct Line
 {
 	Point a, b;
+	string name;
+	int id;
 }allLine[LINEMAX];
 int lineCnt;
 
@@ -30,16 +32,22 @@ struct Arc
 {
 	Point a, b, center;
 	bool clockwise;
+	string name;
+	int id;
 }allArc[ARCMAX];
 int arcCnt;
 
-void addLine(Point a, Point b)   //添加边
+int polyCnt;
+
+void addLine(Point a, Point b, string name)   //添加边
 {
 	allLine[++lineCnt].a = a;
 	allLine[lineCnt].b = b;
+	allLine[lineCnt].name = name;
+	allLine[lineCnt].id = polyCnt;
 }
 
-void addArc(Point a, Point b, double convexity)	//添加圆弧
+void addArc(Point a, Point b, double convexity, string name)	//添加圆弧
 {
 	Arc nowArc;
 	if (convexity > 0)	nowArc.clockwise = false;
@@ -90,6 +98,8 @@ void addArc(Point a, Point b, double convexity)	//添加圆弧
 		else if (dfDiff * theta_arc < 0)	nowArc.center = cen1;
 		else	nowArc.center = cen2; 
 	}
+	nowArc.name = name;
+	nowArc.id = polyCnt;
 
 	allArc[++arcCnt] = nowArc;
 }
@@ -136,18 +146,48 @@ void inputStr(ifstream& fin, string &x, int key, string errStr)
 	exit(0);
 }
 
-void getEntitiesLwPolyline(ifstream& fin)   //读连线信息，按照折线的方式读入
+void inputedStr(ifstream& fin, int a, string &x, int key, string errStr)
+{
+	if (a == key)
+	{
+		getline (fin, x);
+		getline (fin, x);
+		cout << x << endl;
+		return;
+	}
+	cout << errStr << ' ' << a << endl;
+	exit(0);
+}
+
+int getEntitiesLwPolyline(ifstream& fin)   //读连线信息，按照折线的方式读入
 {
 	int a, sum, close, polyType;      //a为里面的预设参数，sum为统计点的数量，close为统计是否闭环
 	string polyNum, subClass, name, subClass2;    //都是dxf文件的定义参数
 	double lineWidth, convexity;
 	Point start, now, last;   //开始节点的x,y;正在读入的节点的x,y;上一个节点的x.y;
-	
+
+	polyCnt++;
 	inputStr(fin, polyNum, 5, "error polyNum");
 	inputInt(fin, polyType, 330, "error polyType");
 	inputStr(fin, subClass, 100, "error subClass");
 	inputStr(fin, name, 8, "error name");
 	inputStr(fin, subClass2, 100, "error subClass2");
+
+	if (subClass2 == "AcDbLine")
+	{
+		double tmp;
+		inputDouble(fin, start.x, 10, "error x");
+		inputDouble(fin, start.y, 20, "error y");
+		inputDouble(fin, tmp, 30, "error z");
+		inputDouble(fin, now.x, 11, "error x");
+		inputDouble(fin, now.y, 21, "error y");
+		inputDouble(fin, tmp, 31, "error z");
+		addLine(start, now, name);
+		
+		fin >> a;
+		return a;
+	}
+
 	inputInt(fin, sum, 90, "error sum");
 	inputInt(fin, close, 70, "error close");
 	inputDouble(fin, lineWidth, 43, "error lineWidth");
@@ -163,20 +203,27 @@ void getEntitiesLwPolyline(ifstream& fin)   //读连线信息，按照折线的�
 		if (a != 10)
 		{
 			cout<<"error x"<<endl;
-			return;
+			return -1;
 		}
 		fin >> now.x;
 		inputDouble(fin, now.y, 20, "error y");
 		if (i == 0)	start = now;
-		if (fabs(convexity) < E)	addLine(last, now);
-		else	addArc(last, now, convexity);
+		if (fabs(convexity) < E)	addLine(last, now, name);
+		else	addArc(last, now, convexity, name);
 		last = now;
 		convexity = 0;
 	}
+	fin >> a;
+	if (a == 42)
+	{
+		fin >> convexity;
+		fin >> a;
+	}
 
 	if (close == 1)
-		if (fabs(convexity) < E)	addLine(now, start);
-		else	addArc(now, start, convexity);
+		if (fabs(convexity) < E)	addLine(now, start, name);
+		else	addArc(now, start, convexity, name);
+	return a;
 }
 
 void buildGraph(void)
@@ -194,12 +241,14 @@ void buildGraph(void)
 
 void getEntities(ifstream& fin)    //对于定义连线的section，针对节点内容读信息
 {
+	int a;
+	fin >> a;
+	string st;
 	while(!fin.eof())
 	{
-		string st;
-		inputStr(fin, st, 0, "error entities");
-		if (st=="LWPOLYLINE")
-			getEntitiesLwPolyline(fin);
+		inputedStr(fin, a, st, 0, "error entities");
+		if (st == "LWPOLYLINE" || st == "LINE")
+			a = getEntitiesLwPolyline(fin);
 		else if (st=="ENDSEC")
 			break;
 		else
