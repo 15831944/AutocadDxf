@@ -14,6 +14,14 @@ const int LINEMAX = 200000;
 const int ARCMAX = 100000;
 const double E = 1e-10;
 const double PI = 3.1415926535897932384626;
+const int AVAILABLE = 1048576;
+
+const string LINE = "LINE";
+const string ENTITY = "AcDbEntity";
+const string ACDBLINE = "AcDbLine";
+const string LAYER1 = "Control 1 - Push up";
+const string LAYER2 = "Control 2 - Push down";
+
 
 struct Point
 {
@@ -37,7 +45,62 @@ struct Arc
 }allArc[ARCMAX];
 int arcCnt;
 
-int polyCnt;
+int polyCnt, added, extraCnt;
+
+string outputStr, bufferStr;
+
+string getNum(void)
+{
+	string nowStr = "";
+	int now = extraCnt + AVAILABLE, tmp;
+	while(now)
+	{
+		tmp = now % 16;
+		if (tmp < 10)
+			nowStr = (char)('0' + tmp) + nowStr;
+		else
+			nowStr = (char)('A' + tmp - 10) + nowStr;
+		now /= 16;
+	}
+	extraCnt ++;
+	return nowStr;
+}
+
+void addExtraLine(Point a, Point b, string layer)
+{
+	outputStr += bufferStr;
+	bufferStr = "";
+	bufferStr += "0\n" + LINE + "\n";
+	bufferStr += "5\n" + getNum() + "\n";
+	bufferStr += "330\n2\n";
+	bufferStr += "100\n" + ENTITY + "\n";
+	bufferStr += "8\n" + layer + "\n";
+	bufferStr += "100\n" + ACDBLINE + "\n";
+
+	bufferStr += "10\n" + to_string(a.x) + "\n";
+	bufferStr += "20\n" + to_string(a.y) + "\n";
+	bufferStr += "30\n0.0\n";
+	bufferStr += "11\n" + to_string(b.x) + "\n";
+	bufferStr += "21\n" + to_string(b.y) + "\n";
+	bufferStr += "31\n0.0\n";
+
+	outputStr += bufferStr;
+	bufferStr = "";
+}
+
+void addAllLines(void)
+{
+	added = 1;
+	Point st, fi;
+	st.x = 20000; st.y = 20000; fi.x = 20000; fi.y = 40000;
+	addExtraLine(st, fi, LAYER1);
+	st.x = 20000; st.y = 40000; fi.x = 40000; fi.y = 40000;
+	addExtraLine(st, fi, LAYER1);
+	st.x = 40000; st.y = 40000; fi.x = 40000; fi.y = 20000;
+	addExtraLine(st, fi, LAYER1);
+	st.x = 40000; st.y = 20000; fi.x = 20000; fi.y = 20000;
+	addExtraLine(st, fi, LAYER1);
+}
 
 void addLine(Point a, Point b, string name)   //添加边
 {
@@ -108,9 +171,11 @@ void inputInt(ifstream& fin, int &x, int key, string errStr)
 {
 	int a;
 	fin >> a;
+	bufferStr += to_string(a) + '\n';
 	if (a == key)
 	{
 		fin >> x;
+		bufferStr += to_string(x) + '\n';
 		return;
 	}
 	cout << errStr << endl;
@@ -121,9 +186,11 @@ void inputDouble(ifstream& fin, double &x, int key, string errStr)
 {
 	int a;
 	fin >> a;
+	bufferStr += to_string(a) + '\n';
 	if (a == key)
 	{
 		fin >> x;
+		bufferStr += to_string(x) + '\n';
 		return;
 	}
 	cout << errStr << endl;
@@ -134,11 +201,13 @@ void inputStr(ifstream& fin, string &x, int key, string errStr)
 {
 	int a;
 	fin >> a;
+	bufferStr += to_string(a) + '\n';
 	cout << a << ' ';
 	if (a == key)
 	{
 		getline (fin, x);
 		getline (fin, x);
+		bufferStr += x + '\n';
 		cout << x << endl;
 		return;
 	}
@@ -152,11 +221,18 @@ void inputedStr(ifstream& fin, int a, string &x, int key, string errStr)
 	{
 		getline (fin, x);
 		getline (fin, x);
+		bufferStr += x + '\n';
 		cout << x << endl;
 		return;
 	}
 	cout << errStr << ' ' << a << endl;
 	exit(0);
+}
+
+void clearBuffer(void)
+{
+	outputStr += bufferStr;
+	bufferStr = "";
 }
 
 int getEntitiesLwPolyline(ifstream& fin)   //读连线信息，按照折线的方式读入
@@ -184,7 +260,14 @@ int getEntitiesLwPolyline(ifstream& fin)   //读连线信息，按照折线的�
 		inputDouble(fin, tmp, 31, "error z");
 		addLine(start, now, name);
 		
+		if (name == "Flow")
+			clearBuffer();
+		else
+			//clearBuffer();
+			bufferStr = "";
+
 		fin >> a;
+		bufferStr += to_string(a) + '\n';
 		return a;
 	}
 
@@ -195,10 +278,13 @@ int getEntitiesLwPolyline(ifstream& fin)   //读连线信息，按照折线的�
 	for (int i = 0; i < sum; i++)    //读入所有的节点
 	{
 		fin >> a;
+		bufferStr += to_string(a) + '\n';
 		if (a == 42)
 		{
 			fin >> convexity;
+			bufferStr += to_string(convexity) + '\n';
 			fin >> a;
+			bufferStr += to_string(a) + '\n';
 		}
 		if (a != 10)
 		{
@@ -206,6 +292,7 @@ int getEntitiesLwPolyline(ifstream& fin)   //读连线信息，按照折线的�
 			return -1;
 		}
 		fin >> now.x;
+		bufferStr += to_string(now.x) + '\n';
 		inputDouble(fin, now.y, 20, "error y");
 		if (i == 0)	start = now;
 		if (fabs(convexity) < E)	addLine(last, now, name);
@@ -216,9 +303,21 @@ int getEntitiesLwPolyline(ifstream& fin)   //读连线信息，按照折线的�
 	fin >> a;
 	if (a == 42)
 	{
+		bufferStr += to_string(a) + '\n';
 		fin >> convexity;
+		bufferStr += to_string(convexity) + '\n';
 		fin >> a;
 	}
+
+	if (name == "Flow")
+		clearBuffer();
+	else
+		//clearBuffer();
+		bufferStr = "";
+	if (!added)
+		addAllLines();
+
+	bufferStr += to_string(a) + '\n';
 
 	if (close == 1)
 		if (fabs(convexity) < E)	addLine(now, start, name);
@@ -242,7 +341,9 @@ void buildGraph(void)
 void getEntities(ifstream& fin)    //对于定义连线的section，针对节点内容读信息
 {
 	int a;
+	clearBuffer();
 	fin >> a;
+	bufferStr += to_string(a) + '\n';
 	string st;
 	while(!fin.eof())
 	{
@@ -272,10 +373,13 @@ void getElse(ifstream& fin)	//不是ENTITIES的section忽略
 {
 	string a;
 	int end = 0;
-	fin >> a;
+	getline (fin, a);
+	getline (fin, a);
+	bufferStr += a + '\n';
 	while (!fin.eof())
 	{
-		fin >> a;
+		getline (fin, a);
+		bufferStr += a + '\n';
 		eraseSpace(a);
 		if (end)
 			if (a == "ENDSEC")
@@ -292,6 +396,7 @@ void getSection(ifstream& fin)	//按照section，即按照不同的板块读文�
 	int a;
 	string st;
 	fin >> a >> st;
+	bufferStr += to_string(a) + '\n' + st + '\n';
 	cout << a << ' ' << st << endl;
 	if (a == 2)
 		if (st=="ENTITIES")	getEntities(fin);
@@ -315,7 +420,15 @@ void readFile(char* filename)	//开始读文件
 			break;
 		}
 	}
+	clearBuffer();
 	fin.close();
+}
+
+void printFile(char* filename)
+{
+	ofstream fout(filename);
+	fout << outputStr;
+	fout.close();
 }
 
 int main(int argc, char **argv)
@@ -326,6 +439,6 @@ int main(int argc, char **argv)
 		return 0;
 	}
 	readFile(argv[1]);
-	//printFile(argv[2]);
+	printFile(argv[2]);
 	return 0;
 }
