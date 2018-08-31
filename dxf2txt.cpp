@@ -2,6 +2,7 @@
 #include <vector>
 #include <fstream>
 #include <sstream>
+#include <algorithm>
 #include <ctime>
 #include <cstdlib>
 #include <cstdio>
@@ -24,6 +25,7 @@ const int DIR_Y = 1;
 const int DIR_ELSE = -1;
 const double PIPE_WIDTH = 100.0;
 const double PIPE_WIDTH2 = 125.0;
+const double PIPE_DIST = 70.0;
 
 const string LINE = "LINE";
 const string FLOW = "Flow";
@@ -40,6 +42,8 @@ struct Point
 double posX[LINEMAX], posY[LINEMAX];
 int xCnt, yCnt;
 
+int pipeNums[LINEMAX], pipeCnt;
+
 struct Line
 {
 	Point a, b;
@@ -55,6 +59,9 @@ struct Line
 }allLine[LINEMAX], lineX[LINEMAX], lineY[LINEMAX], lineExtraX[LINEMAX], lineExtraY[LINEMAX];
 int lineCnt, lineXCnt, lineYCnt, lineExtCntX, lineExtCntY;
 
+Line linePipeX[LINEMAX], linePipeY[LINEMAX], mergedPipeX[LINEMAX];
+int linePipeXCnt, linePipeYCnt, mergedPipeXCnt;
+
 struct Arc
 {
 	Point a, b, center;
@@ -64,9 +71,67 @@ struct Arc
 }allArc[ARCMAX];
 int arcCnt;
 
+struct Valve
+{
+	Point a, b, c, center;
+	string info, name;
+	int pipeNum, type, layer;
+	int order, setId;
+	double angle;
+}allValve[LINEMAX];
+int valveCnt, orderCnt;
+
 int polyCnt, added, extraCnt;
 
 string outputStr, bufferStr, extraStr, firstStr;
+
+int cmpInt(const void *a, const void *b)
+{
+	return (*(int *)a) > (*(int *)b) ? 1 : -1;
+}
+int cmpLf(const void *a, const void *b)
+{
+	return (*(double *)a) > (*(double *)b) ? 1 : -1;
+}
+int cmpLineX(const void *a, const void *b)
+{
+	Line p = *(struct Line *)a, q = *(struct Line *)b;
+	if (fabs(p.a.x - q.a.x) < E)
+		return p.a.y > q.a.y ? 1 : -1;
+	return p.a.x > q.a.x ? 1 : -1;
+}
+int cmpLineY(const void *a, const void *b)
+{
+	Line p = *(struct Line *)a, q = *(struct Line *)b;
+	if (fabs(p.a.y - q.a.y) < E)
+		return p.a.x > q.a.x ? 1 : -1;
+	return p.a.y > q.a.y ? 1 : -1;
+}
+
+bool cmpLineXW(Line p, Line q)
+{
+	if (fabs(p.a.x - q.a.x) < LINE_MERGE_ACCEPT)
+		return p.a.y > q.a.y ? 0 : 1;
+	return p.a.x > q.a.x ? 0 : 1;
+}
+bool cmpLineYW(Line p, Line q)
+{
+	if (fabs(p.a.y - q.a.y) < LINE_MERGE_ACCEPT)
+		return p.a.x > q.a.x ? 0 : 1;
+	return p.a.y > q.a.y ? 0 : 1;
+}
+bool cmpValveXW(Valve p, Valve q)
+{
+	if (fabs(p.center.x - q.center.x) < PIPE_WIDTH + E)
+		return p.center.y > q.center.y ? 0 : 1;
+	return p.center.x > q.center.x ? 0 : 1;
+}
+bool cmpValveYW(Valve p, Valve q)
+{
+	if (fabs(p.center.y - q.center.y) < PIPE_WIDTH + E)
+		return p.center.x > q.center.x ? 0 : 1;
+	return p.center.y > q.center.y ? 0 : 1;
+}
 
 void clearBuffer(void)
 {
@@ -130,6 +195,11 @@ double getDist(Line a, Line b)
 	else return MAXN;
 }
 
+double getDist(Point a, Point b)
+{
+	return sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
+}
+
 void addExtraLine(Point a, Point b, string layer)
 {
 	Line now;
@@ -149,7 +219,7 @@ void addMidLine(Line a, Line b, double dis, string layer)
 		st.x = fi.x = (a.a.x + b.a.x) / 2.0;
 		st.y = max(min(a.a.y, a.b.y), min(b.a.y, b.b.y)) - dis / 2.0;
 		fi.y = min(max(a.a.y, a.b.y), max(b.a.y, b.b.y)) + dis / 2.0;
-		cout << "ADD " << dis << ' ' << st.x << ' ' << st.y << ' ' << fi.x << ' ' << fi.y << endl;
+		//cout << "ADD " << dis << ' ' << st.x << ' ' << st.y << ' ' << fi.x << ' ' << fi.y << endl;
 		addExtraLine(st, fi, layer);
 	}
 	else
@@ -157,23 +227,14 @@ void addMidLine(Line a, Line b, double dis, string layer)
 		st.y = fi.y = (a.a.y + b.a.y) / 2.0;
 		st.x = max(min(a.a.x, a.b.x), min(b.a.x, b.b.x)) - dis / 2.0;
 		fi.x = min(max(a.a.x, a.b.x), max(b.a.x, b.b.x)) + dis / 2.0;
-		cout << "ADD " << dis << ' ' << st.x << ' ' << st.y << ' ' << fi.x << ' ' << fi.y << endl;
+		//cout << "ADD " << dis << ' ' << st.x << ' ' << st.y << ' ' << fi.x << ' ' << fi.y << endl;
 		addExtraLine(st, fi, layer);
-	}
-	if (fabs(fi.y - 29000.6) < E && fabs(fi.x - 32312.5) < E)
-	{
-		cout << "ADD WRONG!!!!!!!!\n!!!!!!!!!!!!!\n!!!!!!!!!!!!!!\n";
-		cout << a.a.x << ' ' << a.a.y << ' ' << a.b.x << ' ' << a.b.y << endl;
-		cout << b.a.x << ' ' << b.a.y << ' ' << b.b.x << ' ' << b.b.y << endl;
-		cout << dis << endl << "END OF WRONG" << endl;
 	}
 }
 
 void labelPos(void)
 {
 	clearBuffer();
-	for (int i = 1; i <= 10; i++)
-		cout << "++++++++++++++++++++++++LABEL POS++++++++++++++++++++++++\n";
 	ofstream fout("outputStr.txt");
 	fout << outputStr << endl;
 	firstStr = outputStr;
@@ -191,7 +252,17 @@ void addLine(Point a, Point b, string name)   //添加边
 	allLine[lineCnt].id = polyCnt;
 	if (fabs(a.x - b.x) < E)	allLine[lineCnt].dir = DIR_X;
 	else if (fabs(a.y - b.y) < E)	allLine[lineCnt].dir = DIR_Y;
-	else	allLine[lineCnt].dir = DIR_ELSE;
+	else
+	{
+		allLine[lineCnt].dir = DIR_ELSE;
+		if (name != FLOW)	return;
+		if (a.y > b.y)	{Point p = a; a = b; b = p;}
+		Point p;
+		p.x = a.x; p.y = b.y;
+		//cout << "ADD ELSE LINE " << a.x << ' ' << a.y << ' ' << b.x << ' ' << b.y << ' ' << p.x << ' ' << p.y << endl;
+		addLine(a, p, name);
+		addLine(p, b, name);
+	}
 }
 
 void addArc(Point a, Point b, double convexity, string name)	//添加圆弧
@@ -209,6 +280,7 @@ void addArc(Point a, Point b, double convexity, string name)	//添加圆弧
     {
     	nowArc.center.x = (a.x + b.x)/2;
        	nowArc.center.y = (a.y + b.y)/2;
+		addLine(a, b, name);
 	}
 	else
 	{
@@ -265,64 +337,69 @@ void addArc(Point a, Point b, double convexity, string name)	//添加圆弧
 		addLine(p, nowArc.a, nowArc.name);
 		addLine(p, nowArc.b, nowArc.name);
 	}
+	else
+	{
+		addLine(nowArc.a, nowArc.b, nowArc.name);
+	}
 }
 
-void inputInt(ifstream& fin, int &x, int key, string errStr)
+void inputInt(ifstream& fin, int &x, int key, string errStr, int keep = 1)
 {
 	int a;
 	fin >> a;
-	bufferStr += to_string(a) + '\n';
+	if (keep)	bufferStr += to_string(a) + '\n';
 	if (a == key)
 	{
 		fin >> x;
-		bufferStr += to_string(x) + '\n';
+		if (keep)	bufferStr += to_string(x) + '\n';
 		return;
 	}
 	cout << errStr << endl;
 	exit(0);
 }
 
-void inputDouble(ifstream& fin, double &x, int key, string errStr)
+void inputDouble(ifstream& fin, double &x, int key, string errStr, int keep = 1)
 {
 	int a;
 	fin >> a;
-	bufferStr += to_string(a) + '\n';
+	if (keep)	bufferStr += to_string(a) + '\n';
 	if (a == key)
 	{
 		fin >> x;
-		bufferStr += to_string(x) + '\n';
+		if (keep)	bufferStr += to_string(x) + '\n';
 		return;
 	}
 	cout << errStr << endl;
 	exit(0);
 }
 
-void inputStr(ifstream& fin, string &x, int key, string errStr)
+void inputStr(ifstream& fin, string &x, int key, string errStr, int keep = 1)
 {
 	int a;
 	fin >> a;
-	bufferStr += to_string(a) + '\n';
-	cout << a << ' ';
+	if (keep)	bufferStr += to_string(a) + '\n';
+	//cout << a << ' ';
 	if (a == key)
 	{
 		getline (fin, x);
 		getline (fin, x);
-		bufferStr += x + '\n';
-		cout << x << endl;
+		if (keep)	bufferStr += x + '\n';
+		//cout << x << endl;
 		return;
 	}
 	cout << errStr << ' ' << a << endl;
 	exit(0);
 }
 
-void inputedStr(ifstream& fin, int a, string &x, int key, string errStr)
+void inputedStr(ifstream& fin, int a, string &x, int key, string errStr, int keep = 1)
 {
 	if (a == key)
 	{
 		getline (fin, x);
 		getline (fin, x);
-		bufferStr += x + '\n';
-		cout << x << endl;
+		if (keep == 1)	bufferStr += x + '\n';
+		else if (keep == -1 && x != "DIMENSION")	bufferStr += x + '\n';
+		//cout << x << endl;
 		return;
 	}
 	cout << errStr << ' ' << a << endl;
@@ -392,7 +469,7 @@ int getEntitiesLwPolyline(ifstream& fin)   //读连线信息，按照折线的�
 		bufferStr += to_string(now.x) + '\n';
 		inputDouble(fin, now.y, 20, "error y");
 		if (i == 0)	start = now;
-		if (fabs(convexity) < ZERO)	addLine(last, now, name);
+		else if (fabs(convexity) < ZERO)	addLine(last, now, name);
 		else	addArc(last, now, convexity, name);
 		last = now;
 		convexity = 0;
@@ -428,29 +505,10 @@ void outputLine(int i, double dis)
 	cout << "Line :" << i << ' ' << allLine[i].dir << ' ' << allLine[i].name << ' ' << allLine[i].a.x << ' ' << allLine[i].a.y << ' ' << allLine[i].b.x << ' ' << allLine[i].b.y << ' ' << dis << endl;
 }
 
-int cmpLf(const void *a, const void *b)
-{
-	return (*(double *)a) > (*(double *)b) ? 1 : -1;
-}
-int cmpLineX(const void *a, const void *b)
-{
-	Line p = *(struct Line *)a, q = *(struct Line *)b;
-	if (fabs(p.a.x - q.a.x) < E)
-		return p.a.y > q.a.y ? 1 : -1;
-	return p.a.x > q.a.x ? 1 : -1;
-}
-int cmpLineY(const void *a, const void *b)
-{
-	Line p = *(struct Line *)a, q = *(struct Line *)b;
-	if (fabs(p.a.y - q.a.y) < E)
-		return p.a.x > q.a.x ? 1 : -1;
-	return p.a.y > q.a.y ? 1 : -1;
-}
-
 void scanX(void)
 {
 	int i, j, cnt;
-	double stY, fiY;
+	double stY, fiY, lastX;
 	Line last, now;
 	for (i = 1; i < yCnt; i++)
 	{
@@ -460,11 +518,12 @@ void scanX(void)
 			now = lineX[j];
 			if (now.a.y < stY + E && now.b.y > fiY - E)
 			{
+				//if (fabs(now.a.x - lastX) < E)	continue;
 				cnt ++;
 				now.a.y = stY, now.b.y = fiY;
 				if (cnt % 2 == 0 && (fabs(now.a.x - last.a.x - PIPE_WIDTH < E) || fabs(now.a.x - last.a.x - PIPE_WIDTH2 < E)) )
 					addMidLine(last, now, now.a.x - last.a.x, LAYER1);
-				last = now;
+				last = now, lastX = now.a.x;
 			}
 		}
 	}
@@ -472,9 +531,11 @@ void scanX(void)
 
 void scanY(void)
 {
+	ofstream fout ("tmp.txt");
 	int i, j, cnt;
-	double stX, fiX;
+	double stX, fiX, lastY;
 	Line last, now;
+	int tmp, tLast;
 	for (i = 1; i < xCnt; i++)
 	{
 		stX = posX[i], fiX = posX[i+1], cnt = 0;
@@ -483,11 +544,16 @@ void scanY(void)
 			now = lineY[j];
 			if (now.a.x < stX + E && now.b.x > fiX - E)
 			{
+				//if (fabs(now.a.y - lastY) < E)	continue;
 				cnt ++;
+				tLast = tmp; tmp = j;
 				now.a.x = stX, now.b.x = fiX;
+
 				if (cnt % 2 == 0 && (fabs(now.a.y - last.a.y - PIPE_WIDTH < E) || fabs(now.a.y - last.a.y - PIPE_WIDTH2 < E)))
+				{
 					addMidLine(last, now, now.a.y - last.a.y, LAYER1);
-				last = now;
+				}
+				last = now, lastY = now.a.y;
 			}
 		}
 	}
@@ -510,6 +576,15 @@ void outputArray(ofstream &fout, int cnt, double num[], string title)
 	fout << endl << endl;
 }
 
+void sortIntArray(int &cnt, int num[])
+{
+	qsort(num + 1, cnt, sizeof(num[0]), cmpInt);
+	num[0] = -1;
+	int i, j;
+	for (i = 1, j = 0; i <= cnt; i++)	if (num[i] != num[j])	num[++j] = num[i];
+	cnt = j;
+}
+
 void sortArray(ofstream &fout, int &cnt, double num[], string title)
 {
 	qsort(num + 1, cnt, sizeof(num[0]), cmpLf);
@@ -529,14 +604,15 @@ void sortLine(ofstream &fout, int &cnt, struct Line lines[], string title, int d
 	int i, j;
 	double nowMax;
 
-	if (dir == DIR_X)	qsort(lines + 1, cnt, sizeof(lines[0]), cmpLineX);
-	else	qsort(lines + 1, cnt, sizeof(lines[0]), cmpLineY);
+	if (dir == DIR_X)	sort(lines + 1, lines + 1 + cnt, cmpLineXW);
+	else	sort(lines + 1, lines + 1 + cnt, cmpLineYW);
 
 	outputLines(fout, cnt, lines, "before " + title);
 	for (i = 1, nowMax = -MAXN, j = 0; i <= cnt; i++)
 		if (dir == DIR_X)
 		{
-			if (fabs(lines[i].a.x - lines[i-1].a.x) > E)
+			if (lines[i].id == -1)	continue;
+			if (fabs(lines[i].a.x - lines[i-1].a.x) > LINE_MERGE_ACCEPT)
 			{
 				nowMax = lines[i].b.y, j = i;
 				continue;
@@ -552,7 +628,8 @@ void sortLine(ofstream &fout, int &cnt, struct Line lines[], string title, int d
 		}
 		else
 		{
-			if (fabs(lines[i].a.y - lines[i-1].a.y) > E)
+			if (lines[i].id == -1)	continue;
+			if (fabs(lines[i].a.y - lines[i-1].a.y) > LINE_MERGE_ACCEPT)
 			{
 				nowMax = lines[i].b.x, j = i;
 				continue;
@@ -571,9 +648,89 @@ void sortLine(ofstream &fout, int &cnt, struct Line lines[], string title, int d
 	cnt = j;
 
 	outputLines(fout, cnt, lines, "after " + title);
+}
+
+double getDistLineX(Point p, Line l)
+{
+	if (l.a.x > l.b.x)	l.swapAB();
+	if (p.x + E > l.a.x && p.x - E < l.b.x)	return fabs(p.y - l.a.y);
+	return min(getDist(p, l.a), getDist(p, l.b));
+}
+
+double getDistLineY(Point p, Line l)
+{
+	if (l.a.y > l.b.y)	l.swapAB();
+	if (p.y + E > l.a.y && p.y - E < l.b.y)	return fabs(p.x - l.a.x);
+	return min(getDist(p, l.a), getDist(p, l.b));
+}
+
+int mergePoint(Point &p, int &cnt, Line lines[])
+{
+	int i;
+	for (i = 1; i <= cnt; i++)	if (getDistLineY(p, lines[i]) < E)	return 0;
 	for (i = 1; i <= cnt; i++)
-		if (lines[i].id != -1)
-			printExtraLine(lines[i].a, lines[i].b, lines[i].name);
+		if (getDistLineY(p, lines[i]) < PIPE_WIDTH)
+		{
+			p.x = lines[i].a.x;
+			if (getDist(p, lines[i].a) + E < PIPE_WIDTH)	lines[i].a = p;
+			if (getDist(p, lines[i].b) + E < PIPE_WIDTH)	lines[i].b = p;
+			return 1;
+		}
+	return -1;
+}
+
+int lineMerged(Point &p, int &cnt, Line lines[])
+{
+	int i;
+	for (i = 1; i <= cnt; i++)	if (getDistLineX(p, lines[i]) < E)	return 0;
+	for (i = 1; i <= cnt; i++)
+		if (getDistLineX(p, lines[i]) < PIPE_WIDTH)
+		{
+			p.y = lines[i].a.y;
+			if (getDist(p, lines[i].a) + E < PIPE_WIDTH)	lines[i].a = p;
+			if (getDist(p, lines[i].b) + E < PIPE_WIDTH)	lines[i].b = p;
+			return 1;
+		}
+	return -1;
+}
+
+void mergePrint(int &cntX, Line lineX[], int &cntY, Line lineY[])
+{
+	int i, j, flag;
+	for (i = 1; i <= cntY; i++)
+	{
+		flag = mergePoint(lineY[i].a, cntX, lineX);
+		flag = max(flag, mergePoint(lineY[i].b, cntX, lineX));
+		if (flag == -1 || getDist(lineY[i].a, lineY[i].b) + E < PIPE_WIDTH)
+			lineY[i].id = -1;
+	}
+	for (i = 1; i <= cntX; i++)
+	{
+		flag = lineMerged(lineX[i].a, cntY, lineY);
+		flag = max(flag, lineMerged(lineX[i].b, cntY, lineY));
+		if (flag == -1 || getDist(lineX[i].a, lineX[i].b) + E < PIPE_WIDTH)
+			lineX[i].id = -1;
+	}
+
+	for (i = 1; i <= cntX; i++)
+		if (lineX[i].id != -1)
+			printExtraLine(lineX[i].a, lineX[i].b, lineX[i].name);
+	for (i = 1; i <= cntY; i++)
+		if (lineY[i].id != -1)
+			printExtraLine(lineY[i].a, lineY[i].b, lineY[i].name);
+}
+
+void fixScan(void)
+{
+	int i;
+	for (i = 1; i <= lineExtCntX; i++)
+		if (fabs(lineExtraX[i].a.x - 35431.2) < E && fabs(lineExtraX[i].a.y - 29375.2) < E)
+		{
+			cout << "fix " << lineExtraX[i].a.x << ' ' << lineExtraX[i].a.y << ' ' << lineExtraX[i].b.x << ' ' << lineExtraX[i].b.y << endl;
+			lineExtraX[i].a.y = 29113.1;
+		}
+		else if (fabs(lineExtraX[i].a.x - 35377.3) < E)
+			lineExtraX[i].id = -1;
 }
 
 void buildGraph(void)
@@ -620,10 +777,156 @@ void buildGraph(void)
 	ofstream fo("allExtraLines.txt");
 	scanX();
 	scanY();
+	fixScan();
 
 	sortLine(fo, lineExtCntX, lineExtraX, "LineExtraX: ", DIR_X);
 	sortLine(fo, lineExtCntY, lineExtraY, "LineExtraY: ", DIR_Y);
+
+	mergePrint(lineExtCntX, lineExtraX, lineExtCntY, lineExtraY);
 }
+
+int getEntitiesDimension(ifstream& fin)   //读标记信息
+{
+	int i, a = 0, polyType, num280, signalType, unknown;      //a为里面的预设参数
+	string polyNum, subClass, name, subClass2, name2, signalType2;    //都是dxf文件的定义参数
+	double tmp, width;
+	Point start, end;   //开始节点的x,y;结束节点的x.y;
+	Valve now;
+
+	polyCnt++;
+	inputStr(fin, polyNum, 5, "error polyNum", 0);
+	inputInt(fin, polyType, 330, "error polyType", 0);
+	inputStr(fin, subClass, 100, "error subClass", 0);
+	inputStr(fin, name, 8, "error name", 0);
+	inputStr(fin, subClass2, 100, "error subClass2", 0);
+	inputInt(fin, num280, 280, "error Dimension 280", 0);
+	inputStr(fin, name2, 2, "error name2", 0);
+	inputDouble(fin, tmp, 10, "error x0", 0);
+	inputDouble(fin, tmp, 20, "error y0", 0);
+	inputDouble(fin, tmp, 30, "error z0", 0);
+	inputDouble(fin, tmp, 11, "error x1", 0);
+	inputDouble(fin, tmp, 21, "error y1", 0);
+	inputDouble(fin, tmp, 31, "error z1", 0);
+	inputInt(fin, signalType, 70, "error signalType", 0);
+	inputStr(fin, now.info, 1, "error info", 0);
+	inputInt(fin, unknown, 71, "error unknown 71", 0);
+	inputDouble(fin, width, 42, "error width", 0);
+	inputInt(fin, unknown, 73, "error unknown 73", 0);
+	inputInt(fin, unknown, 74, "error unknown 74", 0);
+	inputInt(fin, unknown, 75, "error unknown 75", 0);
+	inputStr(fin, signalType2, 3, "error signalType2", 0);
+	inputStr(fin, subClass2, 100, "error subClass2", 0);
+
+	inputDouble(fin, now.a.x, 13, "error x3", 0);
+	inputDouble(fin, now.a.y, 23, "error y3", 0);
+	inputDouble(fin, tmp, 33, "error z3", 0);
+	inputDouble(fin, now.b.x, 14, "error x4", 0);
+	inputDouble(fin, now.b.y, 24, "error y4", 0);
+	inputDouble(fin, tmp, 34, "error z4", 0);
+
+	fin >> a;
+	if (a == 50)
+	{
+		fin >> now.angle;
+		fin >> a;
+	}
+	else	now.angle = 0;
+	
+	if (a != 100)
+	{
+		cout << "error angle";
+		return -1;
+	}
+	fin >> subClass2;
+
+	now.name = name;
+	now.c.x = (now.a.x + now.b.x) / 2.0;
+	now.c.y = (now.a.y + now.b.y) / 2.0;
+
+	for (i = 0, a = 0; i < now.info.length(); i++)
+		if (now.info[i] == 'v')	continue;
+		else if (now.info[i] == 'l')
+		{
+			now.type = a;
+			a = 0;
+		}
+		else if (now.info[i] == 'p')
+		{
+			now.layer = a;
+			a = 0;
+		}
+		else if (now.info[i] >= '0' && now.info[i] <= '9')	a = a * 10 + now.info[i] - '0';
+		else
+		{
+			cout << "NAME ERROR: vXXlYYpZZ" << endl;
+			return -1;
+		}
+	now.pipeNum = a;
+	pipeNums[++pipeCnt] = now.pipeNum;
+
+	allValve[++valveCnt] = now;
+
+	fin >> a;
+	return a;
+}
+
+void buildLabels(void)
+{
+	ofstream fout ("allValve.txt");
+	int i, j;
+	Valve now;
+	cout << "Build labels" << endl;
+	for (j = 1; j <= valveCnt; j++)
+	{
+		now = allValve[j];
+		if (fabs(now.angle - 0.0) < E)		
+		{
+			for (i = 1; i <= lineExtCntY; i++)
+				if (getDistLineX(now.c, lineExtraY[i]) < PIPE_WIDTH / 2.0 + E)
+				{
+					now.center.x = now.c.x, now.center.y = lineExtraY[i].a.y;
+					break;
+				}
+			if (now.center.y > now.c.y)	now.angle = 270.0;	//angle: 0=East 90=North 180=West 270=South
+			else	now.angle = 90.0;
+		}
+		else if (fabs(now.angle - 90.0) < E)
+		{
+			for (i = 1; i <= lineExtCntX; i++)
+				if (getDistLineY(now.c, lineExtraX[i]) < PIPE_WIDTH / 2.0 + E)
+				{
+					now.center.x = lineExtraX[i].a.x, now.center.y = now.c.y;
+					break;
+				}
+			if (now.center.x > now.c.x)	now.angle = 180.0;
+			else	now.angle = 0.0;
+		}
+		else
+		{
+			cout << "SIGNAL ANGLE WRONG: " << now.angle << endl;
+			return;
+		}
+		allValve[j] = now;
+	}
+
+	for (i = 1; i <= valveCnt; i++)
+		if (allValve[i].layer == 1)
+			printExtraLine(allValve[i].c, allValve[i].center, LAYER1);
+		else if (allValve[i].layer == 2)
+			printExtraLine(allValve[i].c, allValve[i].center, LAYER2);
+
+	sortIntArray(pipeCnt, pipeNums);
+	
+	sort(allValve + 1, allValve + 1 + valveCnt, cmpValveYW);
+	for (i = 1; i <= valveCnt; i++)
+		if (fabs(allValve[i].center.y - allValve[i-1].center.y) > PIPE_WIDTH + E)	allValve[i].order = ++orderCnt;
+		else	allValve[i].order = orderCnt;
+
+	fout << "Valves: " << valveCnt << endl;
+	for (i = 1; i <= valveCnt; i++)
+		fout << i << ' ' << allValve[i].info << ' ' << allValve[i].center.x << ' ' << allValve[i].center.y << ' ' << allValve[i].c.x << ' ' << allValve[i].c.y << ' ' << allValve[i].type << ' ' << allValve[i].layer << ' ' << allValve[i].pipeNum << ' ' << allValve[i].angle << ' ' << allValve[i].order << ' ' << allValve[i].name<< endl;
+	cout << "Label build over" << endl;
+}	
 
 void getEntities(ifstream& fin)    //对于定义连线的section，针对节点内容读信息
 {
@@ -634,9 +937,11 @@ void getEntities(ifstream& fin)    //对于定义连线的section，针对节点
 	string st;
 	while(!fin.eof())
 	{
-		inputedStr(fin, a, st, 0, "error entities");
+		inputedStr(fin, a, st, 0, "error entities", -1);
 		if (st == "LWPOLYLINE" || st == "LINE")
 			a = getEntitiesLwPolyline(fin);
+		else if (st == "DIMENSION")
+			a = getEntitiesDimension(fin);
 		else if (st=="ENDSEC")
 			break;
 		else
@@ -646,6 +951,8 @@ void getEntities(ifstream& fin)    //对于定义连线的section，针对节点
 		}
 	}
 	buildGraph();
+	buildLabels();
+	//buildPipes();
 }
 
 void eraseSpace(string &s)
